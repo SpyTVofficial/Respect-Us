@@ -89,9 +89,9 @@
             owner: root
             group: root
           loop:
-            - "{{ board_hub_path }}"
-            - "{{ board_hub_path }}/logs"
-            - "{{ board_hub_path }}/configs"
+            - "{{ respect_us_path }}"
+            - "{{ respect_us_path }}/logs"
+            - "{{ respect_us_path }}/configs"
 
     # =============================
     # SECTION: Code Deployment
@@ -102,7 +102,7 @@
         - name: Upload and extract respect-us.zip
           unarchive:
             src: ../respect-us.zip
-            dest: "{{ board_hub_path }}"
+            dest: "{{ respect_us_path }}"
             remote_src: no
             mode: '0644'
             owner: root
@@ -113,8 +113,8 @@
           stat:
             path: "{{ item }}"
           loop:
-            - "{{ board_hub_path }}/backend"
-            - "{{ board_hub_path }}/frontend"
+            - "{{ respect_us_path }}/backend"
+            - "{{ respect_us_path }}/frontend"
           register: directories_check
 
         - name: Validate extracted directories
@@ -124,7 +124,7 @@
 
         - name: Set proper permissions for application files
           file:
-            path: "{{ board_hub_path }}"
+            path: "{{ respect_us_path }}"
             recurse: yes
             mode: 'u=rwX,g=rX,o=rX'
             owner: root
@@ -213,7 +213,7 @@
       block:
         - name: Create backend Dockerfile with multi-stage build
           copy:
-            dest: "{{ board_hub_path }}/backend/Dockerfile"
+            dest: "{{ respect_us_path }}/backend/Dockerfile"
             content: |
               # Stage 1: Dependencies
               FROM python:3.11-slim as builder
@@ -266,7 +266,7 @@
 
         - name: Create frontend Dockerfile with multi-stage build
           copy:
-            dest: "{{ board_hub_path }}/frontend/Dockerfile"
+            dest: "{{ respect_us_path }}/frontend/Dockerfile"
             content: |
               # Stage 1: Dependencies
               FROM node:20-alpine as deps
@@ -333,7 +333,7 @@
             dest: "{{ item.path }}/.dockerignore"
             content: "{{ item.content }}"
           loop:
-            - path: "{{ board_hub_path }}/backend"
+            - path: "{{ respect_us_path }}/backend"
               content: |
                 __pycache__
                 *.pyc
@@ -362,7 +362,7 @@
                 ENV/
                 Dockerfile
                 .dockerignore
-            - path: "{{ board_hub_path }}/frontend"
+            - path: "{{ respect_us_path }}/frontend"
               content: |
                 node_modules
                 .next
@@ -400,7 +400,7 @@
           docker_image:
             name: "{{ backend_image }}"
             build:
-              path: "{{ board_hub_path }}/backend"
+              path: "{{ respect_us_path }}/backend"
               pull: yes
               nocache: yes
               args:
@@ -426,7 +426,7 @@
           docker_image:
             name: "{{ frontend_image }}"
             build:
-              path: "{{ board_hub_path }}/frontend"
+              path: "{{ respect_us_path }}/frontend"
               pull: yes
               nocache: yes
               args:
