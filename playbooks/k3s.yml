@@ -1,0 +1,25 @@
+- hosts: k3s_master
+  become: yes
+  tasks:
+    - name: Install k3s master
+      shell: |
+        curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode 644" sh -
+
+    - name: Fetch K3S token
+      command: cat /var/lib/rancher/k3s/server/node-token
+      register: k3s_token
+      changed_when: false
+
+    - name: Set fact for token
+      set_fact:
+        master_token: "{{ k3s_token.stdout }}"
+
+- hosts: k3s_workers
+  become: yes
+  vars:
+    master_ip: "{{ hostvars[groups['k3s_master'][0]]['ansible_host'] }}"
+    token: "{{ hostvars[groups['k3s_master'][0]]['master_token'] }}"
+  tasks:
+    - name: Join worker to k3s cluster
+      shell: |
+        curl -sfL https://get.k3s.io | K3S_URL=https://{{ master_ip }}:6443 K3S_TOKEN={{ token }} sh -

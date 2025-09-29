@@ -1,0 +1,970 @@
+---
+- name: Deploy Respect Us Application to K3s Cluster
+  hosts: k3s_master
+  become: yes
+  vars:
+    # Application Configuration
+    respect_us_path: /opt/respect-us
+    backend_image: "imoresdev/respect-us:backend"
+    frontend_image: "imoresdev/respect-us:frontend"
+    
+    # Registry Credentials
+    registry_user: "{{ lookup('env','DOCKER_USER') }}"
+    registry_password: "{{ lookup('env','DOCKER_PASS') }}"
+    
+    # Kubernetes Configuration
+    k3s_kubeconfig: /etc/rancher/k3s/k3s.yaml
+    namespace: respect-us
+    domain_name: respect-us.local
+    
+    # Resource Limits
+    backend_replicas: 2
+    frontend_replicas: 2
+    resource_requests:
+      memory: "256Mi"
+      cpu: "250m"
+    resource_limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+  pre_tasks:
+    # -----------------------------
+    # Validate Prerequisites
+    # -----------------------------
+    - name: Validate Docker registry credentials
+      fail:
+        msg: "Docker registry credentials are required. Set DOCKER_USER and DOCKER_PASS environment variables."
+      when: 
+        - registry_user == "" or registry_password == ""
+      tags: [always]
+
+    - name: Check if respect-us.zip exists locally
+      local_action:
+        module: stat
+        path: "../respect-us.zip"
+      register: zip_file_check
+      tags: [always]
+
+    - name: Fail if respect-us.zip doesn't exist
+      fail:
+        msg: "respect-us.zip not found at ../respect-us.zip"
+      when: not zip_file_check.stat.exists
+      tags: [always]
+
+  handlers:
+    - name: restart docker
+      systemd:
+        name: docker
+        state: restarted
+        daemon_reload: yes
+
+  tasks:
+    # =============================
+    # SECTION: Application Setup
+    # =============================
+    - name: Application Setup
+      tags: [setup]
+      block:
+        - name: Install required system packages
+          apt:
+            name:
+              - unzip
+              - python3-pip
+            state: present
+            update_cache: yes
+            cache_valid_time: 3600
+
+        - name: Install Python Kubernetes library
+          pip:
+            name: 
+              - kubernetes
+              - pyyaml
+            state: present
+
+        - name: Create respect-us directory structure
+          file:
+            path: "{{ item }}"
+            state: directory
+            mode: '0755'
+            owner: root
+            group: root
+          loop:
+            - "{{ board_hub_path }}"
+            - "{{ board_hub_path }}/logs"
+            - "{{ board_hub_path }}/configs"
+
+    # =============================
+    # SECTION: Code Deployment
+    # =============================
+    - name: Deploy Application Code
+      tags: [deploy-code]
+      block:
+        - name: Upload and extract respect-us.zip
+          unarchive:
+            src: ../respect-us.zip
+            dest: "{{ board_hub_path }}"
+            remote_src: no
+            mode: '0644'
+            owner: root
+            group: root
+          register: extraction_result
+
+        - name: Verify extraction success
+          stat:
+            path: "{{ item }}"
+          loop:
+            - "{{ board_hub_path }}/backend"
+            - "{{ board_hub_path }}/frontend"
+          register: directories_check
+
+        - name: Validate extracted directories
+          fail:
+            msg: "Failed to extract required directories. Backend or Frontend directory missing."
+          when: directories_check.results | selectattr('stat.exists', 'equalto', false) | list | length > 0
+
+        - name: Set proper permissions for application files
+          file:
+            path: "{{ board_hub_path }}"
+            recurse: yes
+            mode: 'u=rwX,g=rX,o=rX'
+            owner: root
+            group: root
+
+    # =============================
+    # SECTION: Docker Setup
+    # =============================
+    - name: Docker Installation and Configuration
+      tags: [docker]
+      block:
+        - name: Install Docker prerequisites
+          apt:
+            name:
+              - apt-transport-https
+              - ca-certificates
+              - curl
+              - gnupg
+              - lsb-release
+              - software-properties-common
+            state: present
+            update_cache: yes
+            cache_valid_time: 3600
+
+        - name: Add Docker's official GPG key
+          apt_key:
+            url: https://download.docker.com/linux/ubuntu/gpg
+            state: present
+            keyring: /usr/share/keyrings/docker-archive-keyring.gpg
+
+        - name: Add Docker repository
+          apt_repository:
+            repo: "deb [arch={{ ansible_architecture | replace('x86_64', 'amd64') }} signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+            state: present
+            update_cache: yes
+
+        - name: Install Docker packages
+          apt:
+            name:
+              - docker-ce
+              - docker-ce-cli
+              - containerd.io
+              - docker-buildx-plugin
+              - docker-compose-plugin
+            state: present
+            update_cache: yes
+
+        - name: Configure Docker daemon
+          copy:
+            dest: /etc/docker/daemon.json
+            content: |
+              {
+                "log-driver": "json-file",
+                "log-opts": {
+                  "max-size": "10m",
+                  "max-file": "3"
+                },
+                "storage-driver": "overlay2",
+                "live-restore": true,
+                "userland-proxy": false
+              }
+          notify: restart docker
+
+        - name: Start and enable Docker service
+          systemd:
+            name: docker
+            state: started
+            enabled: yes
+            daemon_reload: yes
+
+        - name: Add ansible user to docker group
+          user:
+            name: "{{ ansible_user }}"
+            groups: docker
+            append: yes
+          when: ansible_user != 'root'
+
+        - name: Reset connection for group changes
+          meta: reset_connection
+
+    # =============================
+    # SECTION: Dockerfile Creation
+    # =============================
+    - name: Create Optimized Dockerfiles
+      tags: [dockerfiles]
+      block:
+        - name: Create backend Dockerfile with multi-stage build
+          copy:
+            dest: "{{ board_hub_path }}/backend/Dockerfile"
+            content: |
+              # Stage 1: Dependencies
+              FROM python:3.11-slim as builder
+              
+              WORKDIR /app
+              
+              # Install build dependencies
+              RUN apt-get update && \
+                  apt-get install -y --no-install-recommends \
+                  build-essential \
+                  && rm -rf /var/lib/apt/lists/*
+              
+              # Install uv for faster dependency installation
+              RUN pip install --no-cache-dir uv
+              
+              # Copy and install dependencies
+              COPY requirements.txt .
+              RUN uv venv .venv && \
+                  . .venv/bin/activate && \
+                  uv pip install --no-cache -r requirements.txt
+              
+              # Stage 2: Runtime
+              FROM python:3.11-slim
+              
+              WORKDIR /app
+              
+              # Create non-root user
+              RUN useradd -m -u 1000 appuser && \
+                  chown -R appuser:appuser /app
+              
+              # Copy virtual environment from builder
+              COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
+              
+              # Copy application code
+              COPY --chown=appuser:appuser . .
+              
+              # Make run script executable
+              RUN chmod +x run.sh 2>/dev/null || true
+              
+              # Health check
+              HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+                CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()" || exit 1
+              
+              USER appuser
+              
+              EXPOSE 8000
+              
+              # Use exec form for proper signal handling
+              CMD ["/bin/bash", "-c", "source .venv/bin/activate && exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2"]
+
+        - name: Create frontend Dockerfile with multi-stage build
+          copy:
+            dest: "{{ board_hub_path }}/frontend/Dockerfile"
+            content: |
+              # Stage 1: Dependencies
+              FROM node:20-alpine as deps
+              
+              WORKDIR /app
+              
+              # Install git for some npm packages
+              RUN apk add --no-cache git
+              
+              # Enable corepack for yarn
+              RUN corepack enable && corepack prepare yarn@stable --activate
+              
+              # Copy dependency files
+              COPY package.json yarn.lock* ./
+              COPY .yarnrc.yml* ./
+              COPY .pnp.* ./
+              COPY .yarn/ ./.yarn/
+              
+              # Install dependencies with cache mount
+              RUN --mount=type=cache,target=/root/.yarn \
+                  yarn install --immutable || yarn install || npm install
+              
+              # Stage 2: Builder
+              FROM node:20-alpine as builder
+              
+              WORKDIR /app
+              
+              # Copy dependencies from deps stage
+              COPY --from=deps /app/node_modules ./node_modules
+              COPY --from=deps /app/.yarn ./.yarn
+              COPY --from=deps /app/.pnp.* ./
+              
+              # Copy source code
+              COPY . .
+              
+              # Build the application (if needed)
+              # RUN yarn build || true
+              
+              # Stage 3: Runner
+              FROM node:20-alpine
+              
+              WORKDIR /app
+              
+              # Create non-root user
+              RUN addgroup -g 1001 nodejs && \
+                  adduser -S nextjs -u 1001
+              
+              # Copy application from builder
+              COPY --from=builder --chown=nextjs:nodejs /app ./
+              
+              # Health check
+              HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+                CMD node -e "require('http').get('http://localhost:3000', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})" || exit 1
+              
+              USER nextjs
+              
+              EXPOSE 3000
+              
+              # Use exec form for proper signal handling
+              CMD ["yarn", "dev", "--host", "0.0.0.0"]
+
+        - name: Create .dockerignore files
+          copy:
+            dest: "{{ item.path }}/.dockerignore"
+            content: "{{ item.content }}"
+          loop:
+            - path: "{{ board_hub_path }}/backend"
+              content: |
+                __pycache__
+                *.pyc
+                *.pyo
+                *.pyd
+                .Python
+                pip-log.txt
+                pip-delete-this-directory.txt
+                .tox/
+                .coverage
+                .coverage.*
+                .cache
+                nosetests.xml
+                coverage.xml
+                *.cover
+                *.log
+                .git
+                .gitignore
+                .mypy_cache
+                .pytest_cache
+                .hypothesis
+                .env
+                .venv
+                env/
+                venv/
+                ENV/
+                Dockerfile
+                .dockerignore
+            - path: "{{ board_hub_path }}/frontend"
+              content: |
+                node_modules
+                .next
+                .cache
+                .yarn/cache
+                .yarn/unplugged
+                .yarn/build-state.yml
+                .yarn/install-state.gz
+                .pnp.*
+                npm-debug.log*
+                yarn-debug.log*
+                yarn-error.log*
+                .env*.local
+                .git
+                .gitignore
+                Dockerfile
+                .dockerignore
+                coverage
+                .nyc_output
+
+    # =============================
+    # SECTION: Docker Build & Push
+    # =============================
+    - name: Build and Push Docker Images
+      tags: [docker-build]
+      block:
+        - name: Docker registry login
+          docker_login:
+            username: "{{ registry_user }}"
+            password: "{{ registry_password }}"
+            reauthorize: yes
+          no_log: true
+
+        - name: Build backend Docker image
+          docker_image:
+            name: "{{ backend_image }}"
+            build:
+              path: "{{ board_hub_path }}/backend"
+              pull: yes
+              nocache: yes
+              args:
+                BUILDKIT_PROGRESS: plain
+            source: build
+            force_source: yes
+            state: present
+          register: backend_build
+          retries: 2
+          delay: 10
+
+        - name: Push backend Docker image
+          docker_image:
+            name: "{{ backend_image }}"
+            push: yes
+            source: local
+          when: backend_build is succeeded
+          register: backend_push
+          retries: 3
+          delay: 5
+
+        - name: Build frontend Docker image
+          docker_image:
+            name: "{{ frontend_image }}"
+            build:
+              path: "{{ board_hub_path }}/frontend"
+              pull: yes
+              nocache: yes
+              args:
+                BUILDKIT_PROGRESS: plain
+            source: build
+            force_source: yes
+            state: present
+          register: frontend_build
+          retries: 2
+          delay: 10
+
+        - name: Push frontend Docker image
+          docker_image:
+            name: "{{ frontend_image }}"
+            push: yes
+            source: local
+          when: (frontend_source_exists | default(false)) and (frontend_build is defined and frontend_build is succeeded)
+          register: frontend_push
+          retries: 3
+          delay: 5
+
+        - name: Clean up Docker build cache
+          shell: docker system prune -f --volumes
+          changed_when: false
+
+    # =============================
+    # SECTION: Kubernetes Deployment
+    # =============================
+    - name: Kubernetes Resources Deployment
+      tags: [k8s-deploy]
+      block:
+        - name: Create respect-us namespace
+          kubernetes.core.k8s:
+            name: "{{ namespace }}"
+            api_version: v1
+            kind: Namespace
+            state: present
+            kubeconfig: "{{ k3s_kubeconfig }}"
+
+        - name: Create Docker registry secret
+          kubernetes.core.k8s:
+            state: present
+            kubeconfig: "{{ k3s_kubeconfig }}"
+            definition:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: docker-registry-secret
+                namespace: "{{ namespace }}"
+              type: kubernetes.io/dockerconfigjson
+              data:
+                .dockerconfigjson: "{{ lookup('template', 'docker-config.json.j2') | b64encode }}"
+          vars:
+            docker_config:
+              auths:
+                "https://index.docker.io/v1/":
+                  username: "{{ registry_user }}"
+                  password: "{{ registry_password }}"
+                  auth: "{{ (registry_user + ':' + registry_password) | b64encode }}"
+          no_log: true
+
+        - name: Deploy ConfigMap for application configuration
+          kubernetes.core.k8s:
+            state: present
+            kubeconfig: "{{ k3s_kubeconfig }}"
+            definition:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: respect-us-config
+                namespace: "{{ namespace }}"
+              data:
+                ENVIRONMENT: "production"
+                LOG_LEVEL: "info"
+                API_URL: "http://respect-us-backend-service:8000"
+
+        - name: Deploy backend application
+          kubernetes.core.k8s:
+            state: present
+            kubeconfig: "{{ k3s_kubeconfig }}"
+            definition:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: respect-us-backend
+                namespace: "{{ namespace }}"
+                labels:
+                  app: respect-us
+                  component: backend
+              spec:
+                replicas: "{{ backend_replicas }}"
+                revisionHistoryLimit: 3
+                strategy:
+                  type: RollingUpdate
+                  rollingUpdate:
+                    maxSurge: 1
+                    maxUnavailable: 0
+                selector:
+                  matchLabels:
+                    app: respect-us-backend
+                template:
+                  metadata:
+                    labels:
+                      app: respect-us-backend
+                      component: backend
+                    annotations:
+                      prometheus.io/scrape: "true"
+                      prometheus.io/port: "8000"
+                      prometheus.io/path: "/metrics"
+                  spec:
+                    imagePullSecrets:
+                      - name: docker-registry-secret
+                    containers:
+                    - name: backend
+                      image: "{{ backend_image }}"
+                      imagePullPolicy: Always
+                      ports:
+                      - name: http
+                        containerPort: 8000
+                        protocol: TCP
+                      env:
+                      - name: PORT
+                        value: "8000"
+                      - name: POD_NAME
+                        valueFrom:
+                          fieldRef:
+                            fieldPath: metadata.name
+                      - name: POD_IP
+                        valueFrom:
+                          fieldRef:
+                            fieldPath: status.podIP
+                      envFrom:
+                      - configMapRef:
+                          name: respect-us-config
+                      resources:
+                        requests:
+                          memory: "{{ resource_requests.memory }}"
+                          cpu: "{{ resource_requests.cpu }}"
+                        limits:
+                          memory: "{{ resource_limits.memory }}"
+                          cpu: "{{ resource_limits.cpu }}"
+                      readinessProbe:
+                        httpGet:
+                          path: /health
+                          port: http
+                        initialDelaySeconds: 10
+                        periodSeconds: 5
+                        timeoutSeconds: 3
+                        successThreshold: 1
+                        failureThreshold: 3
+                      livenessProbe:
+                        httpGet:
+                          path: /health
+                          port: http
+                        initialDelaySeconds: 30
+                        periodSeconds: 10
+                        timeoutSeconds: 5
+                        successThreshold: 1
+                        failureThreshold: 3
+                      startupProbe:
+                        httpGet:
+                          path: /health
+                          port: http
+                        initialDelaySeconds: 0
+                        periodSeconds: 10
+                        timeoutSeconds: 3
+                        successThreshold: 1
+                        failureThreshold: 30
+                    affinity:
+                      podAntiAffinity:
+                        preferredDuringSchedulingIgnoredDuringExecution:
+                        - weight: 100
+                          podAffinityTerm:
+                            labelSelector:
+                              matchExpressions:
+                              - key: app
+                                operator: In
+                                values:
+                                - respect-us-backend
+                            topologyKey: kubernetes.io/hostname
+
+        - name: Deploy backend service
+          kubernetes.core.k8s:
+            state: present
+            kubeconfig: "{{ k3s_kubeconfig }}"
+            definition:
+              apiVersion: v1
+              kind: Service
+              metadata:
+                name: respect-us-backend-service
+                namespace: "{{ namespace }}"
+                labels:
+                  app: respect-us
+                  component: backend
+                annotations:
+                  prometheus.io/scrape: "true"
+                  prometheus.io/port: "8000"
+              spec:
+                selector:
+                  app: respect-us-backend
+                ports:
+                - name: http
+                  protocol: TCP
+                  port: 8000
+                  targetPort: http
+                type: ClusterIP
+                sessionAffinity: ClientIP
+                sessionAffinityConfig:
+                  clientIP:
+                    timeoutSeconds: 10800
+
+        - name: Deploy frontend application
+          kubernetes.core.k8s:
+            state: present
+            kubeconfig: "{{ k3s_kubeconfig }}"
+            definition:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: respect-us-frontend
+                namespace: "{{ namespace }}"
+                labels:
+                  app: respect-us
+                  component: frontend
+              spec:
+                replicas: "{{ frontend_replicas }}"
+                revisionHistoryLimit: 3
+                strategy:
+                  type: RollingUpdate
+                  rollingUpdate:
+                    maxSurge: 1
+                    maxUnavailable: 0
+                selector:
+                  matchLabels:
+                    app: respect-us-frontend
+                template:
+                  metadata:
+                    labels:
+                      app: respect-us-frontend
+                      component: frontend
+                  spec:
+                    imagePullSecrets:
+                      - name: docker-registry-secret
+                    containers:
+                    - name: frontend
+                      image: "{{ frontend_image }}"
+                      imagePullPolicy: Always
+                      ports:
+                      - name: http
+                        containerPort: 3000
+                        protocol: TCP
+                      env:
+                      - name: NEXT_PUBLIC_API_URL
+                        value: "http://respect-us-backend-service:8000"
+                      - name: NODE_ENV
+                        value: "production"
+                      resources:
+                        requests:
+                          memory: "{{ resource_requests.memory }}"
+                          cpu: "{{ resource_requests.cpu }}"
+                        limits:
+                          memory: "{{ resource_limits.memory }}"
+                          cpu: "{{ resource_limits.cpu }}"
+                      readinessProbe:
+                        httpGet:
+                          path: /
+                          port: http
+                        initialDelaySeconds: 15
+                        periodSeconds: 5
+                        timeoutSeconds: 3
+                        successThreshold: 1
+                        failureThreshold: 3
+                      livenessProbe:
+                        httpGet:
+                          path: /
+                          port: http
+                        initialDelaySeconds: 45
+                        periodSeconds: 10
+                        timeoutSeconds: 5
+                        successThreshold: 1
+                        failureThreshold: 3
+                      startupProbe:
+                        httpGet:
+                          path: /
+                          port: http
+                        initialDelaySeconds: 0
+                        periodSeconds: 10
+                        timeoutSeconds: 3
+                        successThreshold: 1
+                        failureThreshold: 30
+                    affinity:
+                      podAntiAffinity:
+                        preferredDuringSchedulingIgnoredDuringExecution:
+                        - weight: 100
+                          podAffinityTerm:
+                            labelSelector:
+                              matchExpressions:
+                              - key: app
+                                operator: In
+                                values:
+                                - respect-us-frontend
+                            topologyKey: kubernetes.io/hostname
+
+        - name: Deploy frontend service
+          kubernetes.core.k8s:
+            state: present
+            kubeconfig: "{{ k3s_kubeconfig }}"
+            definition:
+              apiVersion: v1
+              kind: Service
+              metadata:
+                name: respect-us-frontend-service
+                namespace: "{{ namespace }}"
+                labels:
+                  app: respect-us
+                  component: frontend
+              spec:
+                selector:
+                  app: respect-us-frontend
+                ports:
+                - name: http
+                  protocol: TCP
+                  port: 3000
+                  targetPort: http
+                type: ClusterIP
+
+        - name: Deploy Ingress with TLS support
+          kubernetes.core.k8s:
+            state: present
+            kubeconfig: "{{ k3s_kubeconfig }}"
+            definition:
+              apiVersion: networking.k8s.io/v1
+              kind: Ingress
+              metadata:
+                name: respect-us-ingress
+                namespace: "{{ namespace }}"
+                annotations:
+                  kubernetes.io/ingress.class: "nginx"
+                  nginx.ingress.kubernetes.io/ssl-redirect: "false"
+                  nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
+                  nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+                  nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+                  nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+                  nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+                  nginx.ingress.kubernetes.io/enable-cors: "true"
+                  nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+                  nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization"
+                  nginx.ingress.kubernetes.io/rate-limit: "100"
+              spec:
+                ingressClassName: nginx
+                rules:
+                - host: "{{ domain_name }}"
+                  http:
+                    paths:
+                    - path: /api
+                      pathType: Prefix
+                      backend:
+                        service:
+                          name: respect-us-backend-service
+                          port:
+                            number: 8000
+                    - path: /
+                      pathType: Prefix
+                      backend:
+                        service:
+                          name: respect-us-frontend-service
+                          port:
+                            number: 3000
+
+        - name: Deploy HorizontalPodAutoscaler for backend
+          kubernetes.core.k8s:
+            state: present
+            kubeconfig: "{{ k3s_kubeconfig }}"
+            definition:
+              apiVersion: autoscaling/v2
+              kind: HorizontalPodAutoscaler
+              metadata:
+                name: respect-us-backend-hpa
+                namespace: "{{ namespace }}"
+              spec:
+                scaleTargetRef:
+                  apiVersion: apps/v1
+                  kind: Deployment
+                  name: respect-us-backend
+                minReplicas: "{{ backend_replicas }}"
+                maxReplicas: 10
+                metrics:
+                - type: Resource
+                  resource:
+                    name: cpu
+                    target:
+                      type: Utilization
+                      averageUtilization: 70
+                - type: Resource
+                  resource:
+                    name: memory
+                    target:
+                      type: Utilization
+                      averageUtilization: 80
+
+        - name: Deploy HorizontalPodAutoscaler for frontend
+          kubernetes.core.k8s:
+            state: present
+            kubeconfig: "{{ k3s_kubeconfig }}"
+            definition:
+              apiVersion: autoscaling/v2
+              kind: HorizontalPodAutoscaler
+              metadata:
+                name: respect-us-frontend-hpa
+                namespace: "{{ namespace }}"
+              spec:
+                scaleTargetRef:
+                  apiVersion: apps/v1
+                  kind: Deployment
+                  name: respect-us-frontend
+                minReplicas: "{{ frontend_replicas }}"
+                maxReplicas: 10
+                metrics:
+                - type: Resource
+                  resource:
+                    name: cpu
+                    target:
+                      type: Utilization
+                      averageUtilization: 70
+                - type: Resource
+                  resource:
+                    name: memory
+                    target:
+                      type: Utilization
+                      averageUtilization: 80
+
+    # =============================
+    # SECTION: Deployment Verification
+    # =============================
+    - name: Verify Deployment
+      tags: [verify]
+      block:
+        - name: Wait for backend deployment rollout
+          kubernetes.core.k8s_info:
+            api_version: apps/v1
+            kind: Deployment
+            name: respect-us-backend
+            namespace: "{{ namespace }}"
+            kubeconfig: "{{ k3s_kubeconfig }}"
+            wait: true
+            wait_condition:
+              type: Progressing
+              status: "True"
+              reason: NewReplicaSetAvailable
+            wait_timeout: 600
+          register: backend_deployment
+
+        - name: Wait for frontend deployment rollout
+          kubernetes.core.k8s_info:
+            api_version: apps/v1
+            kind: Deployment
+            name: respect-us-frontend
+            namespace: "{{ namespace }}"
+            kubeconfig: "{{ k3s_kubeconfig }}"
+            wait: true
+            wait_condition:
+              type: Progressing
+              status: "True"
+              reason: NewReplicaSetAvailable
+            wait_timeout: 600
+          register: frontend_deployment
+
+        - name: Get all pods status
+          kubernetes.core.k8s_info:
+            api_version: v1
+            kind: Pod
+            namespace: "{{ namespace }}"
+            kubeconfig: "{{ k3s_kubeconfig }}"
+          register: pods_status
+
+        - name: Verify all pods are running
+          assert:
+            that:
+              - item.status.phase == "Running"
+            fail_msg: "Pod {{ item.metadata.name }} is not running. Status: {{ item.status.phase }}"
+          loop: "{{ pods_status.resources }}"
+          loop_control:
+            label: "{{ item.metadata.name }}"
+
+        - name: Test backend health endpoint
+          uri:
+            url: "http://{{ ansible_default_ipv4.address }}:8000/health"
+            method: GET
+            status_code: [200, 404]
+          register: backend_health
+          retries: 5
+          delay: 10
+          until: backend_health.status in [200, 404]
+          ignore_errors: yes
+
+        - name: Get ingress details
+          kubernetes.core.k8s_info:
+            api_version: networking.k8s.io/v1
+            kind: Ingress
+            name: respect-us-ingress
+            namespace: "{{ namespace }}"
+            kubeconfig: "{{ k3s_kubeconfig }}"
+          register: ingress_info
+
+        - name: Create deployment summary
+          set_fact:
+            deployment_summary: |
+              =====================================
+              respect-us DEPLOYMENT COMPLETED
+              =====================================
+              
+              Deployment Status: SUCCESS
+              Namespace: {{ namespace }}
+              
+              Access URLs:
+              ------------
+              Frontend: http://{{ domain_name }}
+              Backend API: http://{{ domain_name }}/api
+              
+              Pod Status:
+              -----------
+              Backend Pods: {{ backend_deployment.resources[0].status.readyReplicas | default(0) }}/{{ backend_deployment.resources[0].status.replicas | default(0) }} Ready
+              Frontend Pods: {{ frontend_deployment.resources[0].status.readyReplicas | default(0) }}/{{ frontend_deployment.resources[0].status.replicas | default(0) }} Ready
+              
+              Local Access Setup:
+              -------------------
+              Add this to your /etc/hosts file:
+              {{ ansible_default_ipv4.address }} {{ domain_name }}
+              
+              Or access directly via IP:
+              Frontend: http://{{ ansible_default_ipv4.address }}
+              API: http://{{ ansible_default_ipv4.address }}/api
+              
+              Useful Commands:
+              ----------------
+              # Check pod status
+              kubectl get pods -n {{ namespace }}
+              
+              # View logs
+              kubectl logs -f -l app=respect-us-backend -n {{ namespace }}
+              kubectl logs -f -l app=respect-us-frontend -n {{ namespace }}
