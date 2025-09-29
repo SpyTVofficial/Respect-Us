@@ -367,11 +367,11 @@
                 node_modules
                 .next
                 .cache
-                .yarn/cache
-                .yarn/unplugged
-                .yarn/build-state.yml
-                .yarn/install-state.gz
-                .pnp.*
+                #.yarn/cache
+                #.yarn/unplugged
+                #.yarn/build-state.yml
+                #.yarn/install-state.gz
+                #.pnp.*
                 npm-debug.log*
                 yarn-debug.log*
                 yarn-error.log*
