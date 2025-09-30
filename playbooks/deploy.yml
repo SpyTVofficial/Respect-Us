@@ -217,10 +217,12 @@
               WORKDIR /app
               RUN apk add --no-cache git
               RUN corepack enable && corepack prepare yarn@stable --activate
-              COPY package.json yarn.lock* ./
-              COPY .yarnrc.yml* ./
-              COPY .pnp.* ./
-              COPY .yarn/ ./.yarn/
+              COPY package.json ./
+              COPY yarn.lock* . || true
+              COPY .yarnrc.yml* . || true
+              COPY .pnp.* . || true
+              COPY .yarn/ ./.yarn/ || true
+
               RUN --mount=type=cache,target=/root/.yarn yarn install --immutable || yarn install || npm install
 
               # Stage 2: Builder
