@@ -215,24 +215,27 @@
               # Stage 1: Dependencies
               FROM node:20-alpine AS deps
               WORKDIR /app
+
               RUN apk add --no-cache git
               RUN corepack enable && corepack prepare yarn@stable --activate
-              COPY package.json ./
-              COPY yarn.lock* . || true
-              COPY .yarnrc.yml* . || true
-              COPY .pnp.* . || true
-              COPY .yarn/ ./.yarn/ || true
 
-              RUN --mount=type=cache,target=/root/.yarn yarn install --immutable || yarn install || npm install
+              # Copy only what exists
+              COPY package.json ./
+              COPY yarn.lock* ./
+              # If you are on Yarn Berry, uncomment the next 3 lines:
+              # COPY .yarnrc.yml ./
+              # COPY .pnp.* ./
+              # COPY .yarn/ ./.yarn/
+
+              RUN --mount=type=cache,target=/root/.yarn \
+                  yarn install --immutable || yarn install || npm install
 
               # Stage 2: Builder
               FROM node:20-alpine AS builder
               WORKDIR /app
               COPY --from=deps /app/node_modules ./node_modules
-              COPY --from=deps /app/.yarn ./.yarn
-              COPY --from=deps /app/.pnp.* ./
               COPY . .
-              # (Optional) RUN yarn build
+              # RUN yarn build   # uncomment if you want to build at image build time
 
               # Stage 3: Runner
               FROM node:20-alpine
@@ -244,7 +247,6 @@
               USER nextjs
               EXPOSE 3000
               CMD ["yarn", "dev", "--host", "0.0.0.0"]
-
         - name: Create .dockerignore for backend
           copy:
             dest: "{{ respect_us_path }}/backend/.dockerignore"
