@@ -138,12 +138,11 @@
             update_cache: yes
 
         - name: Install Docker using Docker’s official convenience script
-          shell: |
-            curl -fsSL https://get.docker.com | sh
+          ansible.builtin.shell: curl -fsSL https://get.docker.com | sh
           args:
-            warn: false
-          changed_when: "'installed' in result.stdout or 'upgraded' in result.stdout"
-          register: result
+            executable: /bin/bash
+          register: docker_install
+          changed_when: "'Docker' in docker_install.stdout or 'docker' in docker_install.stdout"
 
         - name: Configure Docker daemon (logging and storage)
           copy:
