@@ -1,5 +1,5 @@
 ---
-- name: Deploy Respect Us Application to K3s Cluster (Revised)
+- name: Deploy Respect Us Application to K3s Cluster
   hosts: k3s_master
   become: yes
   vars:
@@ -81,6 +81,16 @@
     - name: Deploy application code from ZIP
       tags: [deploy-code]
       block:
+        - name: Remove old extraction if exists
+          file:
+            path: "{{ respect_us_path }}/backend"
+            state: absent
+
+        - name: Remove old frontend if exists
+          file:
+            path: "{{ respect_us_path }}/frontend"
+            state: absent
+
         - name: Extract respect-us.zip to target directory
           ansible.builtin.unarchive:
             src: ../respect-us.zip
@@ -109,6 +119,25 @@
             mode: 'u=rwX,g=rX,o=rX'
             owner: root
             group: root
+
+        - name: Debug - Show frontend directory structure
+          shell: |
+            echo "=== Frontend directory listing ==="
+            ls -laR {{ respect_us_path }}/frontend/
+            echo ""
+            echo "=== Checking for package.json ==="
+            if [ -f {{ respect_us_path }}/frontend/package.json ]; then
+              echo "✓ package.json found"
+              head -20 {{ respect_us_path }}/frontend/package.json
+            else
+              echo "✗ package.json NOT FOUND"
+              find {{ respect_us_path }}/frontend -name "package.json" 2>/dev/null || echo "No package.json found anywhere"
+            fi
+          register: frontend_structure
+          
+        - name: Display frontend structure
+          debug:
+            var: frontend_structure.stdout_lines
 
     - name: Install and configure Docker
       tags: [docker]
@@ -208,24 +237,87 @@
               EXPOSE 8000
               CMD ["/bin/bash", "-c", "source venv/bin/activate && exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2"]
 
-
-        - name: Write frontend multi-stage Dockerfile
+        - name: Write frontend Dockerfile with debugging
           copy:
             dest: "{{ respect_us_path }}/frontend/Dockerfile"
             content: |
               FROM node:20-alpine
               WORKDIR /app
-              RUN apk add --no-cache git python3 make g++ bash libc6-compat
+              
+              # Install system dependencies
+              RUN apk add --no-cache \
+                  git \
+                  python3 \
+                  make \
+                  g++ \
+                  bash \
+                  libc6-compat \
+                  wget
+              
+              # Enable corepack for yarn/pnpm
               RUN corepack enable
+              
+              # Copy all files
               COPY . .
-              RUN ls -la && \
-                  npm install --legacy-peer-deps || \
-                  yarn install || \
-                  (echo "Install failed!" && exit 1)
-              RUN addgroup -g 1001 nodejs && adduser -S nextjs -u 1001 && chown -R nextjs:nodejs /app
+              
+              # Debug - show what we have
+              RUN echo "=== BUILD DEBUG INFO ===" && \
+                  echo "Directory contents:" && \
+                  ls -la && \
+                  echo "" && \
+                  if [ -f package.json ]; then \
+                    echo "✓ package.json exists" && \
+                    echo "Content preview:" && \
+                    head -20 package.json; \
+                  else \
+                    echo "✗ ERROR: package.json NOT FOUND" && \
+                    exit 1; \
+                  fi
+              
+              # Install dependencies
+              RUN set -ex && \
+                  if [ -f yarn.lock ]; then \
+                    echo "==> Installing with yarn" && \
+                    yarn install --network-timeout 100000; \
+                  elif [ -f package-lock.json ]; then \
+                    echo "==> Installing with npm (using package-lock.json)" && \
+                    npm ci --legacy-peer-deps || npm install --legacy-peer-deps; \
+                  elif [ -f pnpm-lock.yaml ]; then \
+                    echo "==> Installing with pnpm" && \
+                    corepack prepare pnpm@latest --activate && \
+                    pnpm install; \
+                  else \
+                    echo "==> No lockfile found, using npm install" && \
+                    npm install --legacy-peer-deps; \
+                  fi
+              
+              # Verify installation
+              RUN if [ -d node_modules ]; then \
+                    echo "✓ node_modules created" && \
+                    du -sh node_modules; \
+                  else \
+                    echo "✗ ERROR: node_modules not created" && \
+                    exit 1; \
+                  fi
+              
+              # Create non-root user
+              RUN addgroup -g 1001 nodejs && \
+                  adduser -S nextjs -u 1001 && \
+                  chown -R nextjs:nodejs /app
+              
+              # Health check
+              HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+                CMD wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1
+              
               USER nextjs
               EXPOSE 3000
+              
+              ENV PORT=3000
+              ENV HOSTNAME="0.0.0.0"
+              ENV NEXT_TELEMETRY_DISABLED=1
+              
               CMD ["npm", "run", "dev"]
+
         - name: Create .dockerignore for backend
           copy:
             dest: "{{ respect_us_path }}/backend/.dockerignore"
@@ -280,25 +372,47 @@
           retries: 3
           delay: 5
 
-        - name: Build frontend Docker image
-          community.docker.docker_image:
-            name: "{{ frontend_image }}"
-            source: build
-            build:
-              path: "{{ respect_us_path }}/frontend"
-              pull: yes
-              nocache: yes
-            tag: "{{ frontend_image.split(':')[1] }}"
-          register: frontend_build
-          retries: 2
-          delay: 10
+        - name: Build frontend Docker image with full logging
+          shell: |
+            set -e
+            cd {{ respect_us_path }}/frontend
+            
+            # Build with full output
+            docker build \
+              --progress=plain \
+              --no-cache \
+              -t {{ frontend_image }} \
+              . 2>&1 | tee {{ respect_us_path }}/logs/frontend-build.log
+            
+            # Check if build succeeded
+            if [ ${PIPESTATUS[0]} -eq 0 ]; then
+              echo "✓ Frontend build completed successfully"
+              exit 0
+            else
+              echo "✗ Frontend build failed"
+              exit 1
+            fi
+          register: frontend_build_shell
+          failed_when: frontend_build_shell.rc != 0
+
+        - name: Display build log on failure
+          shell: tail -n 150 {{ respect_us_path }}/logs/frontend-build.log
+          register: build_log_output
+          when: frontend_build_shell.failed
+
+        - name: Show detailed error information
+          debug:
+            msg: 
+              - "=== FRONTEND BUILD FAILED ==="
+              - "{{ build_log_output.stdout_lines }}"
+          when: frontend_build_shell.failed
 
         - name: Push frontend Docker image
           community.docker.docker_image:
             name: "{{ frontend_image }}"
             push: true
             source: local
-          when: frontend_build is succeeded
+          when: frontend_build_shell.rc == 0
           register: frontend_push
           retries: 3
           delay: 5
@@ -734,6 +848,5 @@
 
               Add to /etc/hosts for local access:
                 {{ ansible_default_ipv4.address }} {{ domain_name }}
-              Or use direct IP:
-                Frontend: http://{{ ansible_default_ipv4.address }}
-                Backend:  http://{{ ansible_default_ipv4.address }}/api
+              
+              Build logs saved to: {{ respect_us_path }}/logs/frontend-build.log
