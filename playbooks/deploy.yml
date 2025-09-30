@@ -124,25 +124,29 @@
               - software-properties-common
             state: present
             update_cache: yes
-
-        - name: Add Docker GPG key
+            
+        - name: Add Docker's official GPG key
           apt_key:
             url: https://download.docker.com/linux/ubuntu/gpg
             state: present
             keyring: /usr/share/keyrings/docker-archive-keyring.gpg
 
-        - name: Add Docker APT repository
+        - name: Add Docker repository
           apt_repository:
-            repo: "deb [arch={{ ansible_architecture }} signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+            repo: "deb [arch={{ ansible_architecture | replace('x86_64', 'amd64') }} signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
             state: present
             update_cache: yes
 
-        - name: Install Docker using Docker’s official convenience script
-          ansible.builtin.shell: curl -fsSL https://get.docker.com | sh
-          args:
-            executable: /bin/bash
-          register: docker_install
-          changed_when: "'Docker' in docker_install.stdout or 'docker' in docker_install.stdout"
+        - name: Install Docker packages
+          apt:
+            name:
+              - docker-ce
+              - docker-ce-cli
+              - containerd.io
+              - docker-buildx-plugin
+              - docker-compose-plugin
+            state: present
+            update_cache: yes
 
         - name: Configure Docker daemon (logging and storage)
           copy:
