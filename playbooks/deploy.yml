@@ -208,6 +208,13 @@
               EXPOSE 8000
               CMD ["/bin/bash", "-c", "source venv/bin/activate && exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2"]
 
+        - name: Enable Docker BuildKit
+          ansible.builtin.shell: |
+            export DOCKER_BUILDKIT=1
+            export COMPOSE_DOCKER_CLI_BUILD=1
+          args:
+            executable: /bin/bash
+
         - name: Write frontend multi-stage Dockerfile
           copy:
             dest: "{{ respect_us_path }}/frontend/Dockerfile"
