@@ -105,7 +105,7 @@
           remote_src: false
           mode: 0755
           extra_opts: [--strip-components=1]
-            register: extraction_result
+          register: extraction_result
 
         - name: Verify extraction success
           stat:
