@@ -100,11 +100,12 @@
       tags: [deploy-code]
       block:
         - name: Upload and extract respect-us.zip
-          src: ../respect-us.zip
-          dest: "{{ respect_us_path }}"
-          remote_src: false
-          mode: 0755
-          extra_opts: [--strip-components=1]
+          unarchive:
+            src: ../respect-us.zip
+            dest: "{{ respect_us_path }}"
+            remote_src: false
+            mode: 0755
+            extra_opts: [--strip-components=1]
           register: extraction_result
 
         - name: Verify extraction success
