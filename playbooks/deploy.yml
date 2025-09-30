@@ -228,7 +228,7 @@
               RUN if [ -f yarn.lock ]; then yarn install; \
                   elif [ -f package-lock.json ]; then npm install; \
                   elif [ -f pnpm-lock.yaml ]; then pnpm install; \
-                  else echo "No lockfile found" && exit 1; fi
+                  else echo "No lockfile found"; fi
 
               # Copy only what exists
               COPY package.json ./
