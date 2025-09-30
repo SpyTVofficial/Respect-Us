@@ -213,74 +213,19 @@
           copy:
             dest: "{{ respect_us_path }}/frontend/Dockerfile"
             content: |
-              # Stage 1: Dependencies
-              FROM node:20-alpine AS deps
+              FROM node:20-alpine
               WORKDIR /app
-
-              # Install required build tools
-              RUN apk add --no-cache git python3 make g++ bash curl libc6-compat
-
-              # Enable corepack for yarn
-              RUN corepack enable && corepack prepare yarn@stable --activate
-
-              # Copy package files
-              COPY package.json ./
-              COPY yarn.lock* package-lock.json* pnpm-lock.yaml* ./
-
-              # Install dependencies with proper error handling
-              RUN set -eux; \
-                  if [ -f yarn.lock ]; then \
-                    echo "Installing with yarn..." && yarn install --frozen-lockfile; \
-                  elif [ -f package-lock.json ]; then \
-                    echo "Installing with npm..." && npm ci; \
-                  elif [ -f pnpm-lock.yaml ]; then \
-                    corepack prepare pnpm@latest --activate && pnpm install --frozen-lockfile; \
-                  else \
-                    echo "No lockfile found, using yarn..." && yarn install; \
-                  fi
-
-              # Stage 2: Builder
-              FROM node:20-alpine AS builder
-              WORKDIR /app
-              
-              # Copy dependencies from deps stage
-              COPY --from=deps /app/node_modules ./node_modules
-              
-              # Copy application code
+              RUN apk add --no-cache git python3 make g++ bash libc6-compat
+              RUN corepack enable
               COPY . .
-              
-              # Optional: Uncomment to build at image build time
-              # ENV NEXT_TELEMETRY_DISABLED 1
-              # RUN yarn build
-
-              # Stage 3: Runner
-              FROM node:20-alpine AS runner
-              WORKDIR /app
-
-              ENV NODE_ENV=production
-              ENV NEXT_TELEMETRY_DISABLED=1
-
-              # Create non-root user
-              RUN addgroup -g 1001 nodejs && \
-                  adduser -S nextjs -u 1001
-
-              # Copy everything from builder
-              COPY --from=builder --chown=nextjs:nodejs /app ./
-
-              # Health check
-              HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-                CMD node -e "require('http').get('http://localhost:3000', (r) => { process.exit(r.statusCode===200?0:1) })" || exit 1
-
+              RUN ls -la && \
+                  npm install --legacy-peer-deps || \
+                  yarn install || \
+                  (echo "Install failed!" && exit 1)
+              RUN addgroup -g 1001 nodejs && adduser -S nextjs -u 1001 && chown -R nextjs:nodejs /app
               USER nextjs
-
               EXPOSE 3000
-
-              ENV PORT=3000
-              ENV HOSTNAME="0.0.0.0"
-
-              # Use yarn dev for development, or yarn start for production builds
-              CMD ["yarn", "dev"]
-              
+              CMD ["npm", "run", "dev"]
         - name: Create .dockerignore for backend
           copy:
             dest: "{{ respect_us_path }}/backend/.dockerignore"
