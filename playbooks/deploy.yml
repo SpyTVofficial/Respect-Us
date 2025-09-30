@@ -243,7 +243,7 @@
             content: |
               FROM node:20-alpine
               WORKDIR /app
-              
+
               # Install system dependencies
               RUN apk add --no-cache \
                   git \
@@ -253,13 +253,13 @@
                   bash \
                   libc6-compat \
                   wget
-              
-              # Enable corepack for yarn/pnpm
-              RUN corepack enable
-              
+
+              # Enable corepack for yarn/pnpm and pin Yarn for reproducibility
+              RUN corepack enable && corepack prepare yarn@4.0.2 --activate
+
               # Copy all files
               COPY . .
-              
+
               # Debug - show what we have
               RUN echo "=== BUILD DEBUG INFO ===" && \
                   echo "Directory contents:" && \
@@ -273,24 +273,38 @@
                     echo "✗ ERROR: package.json NOT FOUND" && \
                     exit 1; \
                   fi
-              
+
               # Install dependencies
-              RUN set -ex && \
+              RUN set -ex; \
+                  PATCH_PRESENT=0; \
+                  grep -q '"patch:' package.json && PATCH_PRESENT=1 || true; \
+                  PATCH_COUNT=0; \
+                  [ -d .yarn/patches ] && PATCH_COUNT=$(ls -1 .yarn/patches/*.patch 2>/dev/null | wc -l | tr -d ' ') || true; \
                   if [ -f yarn.lock ]; then \
-                    echo "==> Installing with yarn" && \
-                    yarn install --network-timeout 100000; \
+                    if [ "$PATCH_PRESENT" -eq 1 ] && [ "$PATCH_COUNT" -gt 0 ]; then \
+                      echo "==> Installing with yarn (patches present)"; \
+                      YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install --network-timeout 100000; \
+                    elif [ "$PATCH_PRESENT" -eq 1 ] && [ "$PATCH_COUNT" -eq 0 ]; then \
+                      echo "!! Yarn patch protocol detected in package.json but .yarn/patches is missing; stripping patch and using npm"; \
+                      node -e "let fs=require('fs');let p=JSON.parse(fs.readFileSync('package.json','utf8'));let v=p.dependencies && p.dependencies['@stackframe/react'];if(v){let m=v.match(/^patch:@stackframe\\/react@npm%3A([^#]+)/);if(m){p.dependencies['@stackframe/react']=decodeURIComponent(m[1]);fs.writeFileSync('package.json',JSON.stringify(p,null,2));console.log('Rewrote @stackframe/react to',decodeURIComponent(m[1]));}}" ; \
+                      rm -f yarn.lock .pnp.cjs .pnp.loader.mjs; \
+                      npm install --legacy-peer-deps; \
+                    else \
+                      echo "==> Installing with yarn"; \
+                      YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install --network-timeout 100000; \
+                    fi; \
                   elif [ -f package-lock.json ]; then \
-                    echo "==> Installing with npm (using package-lock.json)" && \
+                    echo "==> Installing with npm (using package-lock.json)"; \
                     npm ci --legacy-peer-deps || npm install --legacy-peer-deps; \
                   elif [ -f pnpm-lock.yaml ]; then \
-                    echo "==> Installing with pnpm" && \
-                    corepack prepare pnpm@latest --activate && \
+                    echo "==> Installing with pnpm"; \
+                    corepack prepare pnpm@latest --activate; \
                     pnpm install; \
                   else \
-                    echo "==> No lockfile found, using npm install" && \
+                    echo "==> No lockfile found, using npm install"; \
                     npm install --legacy-peer-deps; \
                   fi
-              
+
               # Verify installation
               RUN if [ -d node_modules ]; then \
                     echo "✓ node_modules created" && \
@@ -299,23 +313,23 @@
                     echo "✗ ERROR: node_modules not created" && \
                     exit 1; \
                   fi
-              
+
               # Create non-root user
               RUN addgroup -g 1001 nodejs && \
                   adduser -S nextjs -u 1001 && \
                   chown -R nextjs:nodejs /app
-              
+
               # Health check
               HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
                 CMD wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1
-              
+
               USER nextjs
               EXPOSE 3000
-              
+
               ENV PORT=3000
               ENV HOSTNAME="0.0.0.0"
               ENV NEXT_TELEMETRY_DISABLED=1
-              
+
               CMD ["npm", "run", "dev"]
 
         - name: Create .dockerignore for backend
@@ -374,26 +388,22 @@
 
         - name: Build frontend Docker image with full logging
           shell: |
-            set -e
+            set -Eeuo pipefail
             cd {{ respect_us_path }}/frontend
-            
-            # Build with full output
+
+            # Build with full output (pipefail ensures failure is detected even with tee)
             docker build \
               --progress=plain \
               --no-cache \
               -t {{ frontend_image }} \
               . 2>&1 | tee {{ respect_us_path }}/logs/frontend-build.log
-            
-            # Check if build succeeded
-            if [ ${PIPESTATUS[0]} -eq 0 ]; then
-              echo "✓ Frontend build completed successfully"
-              exit 0
-            else
-              echo "✗ Frontend build failed"
-              exit 1
-            fi
+
+            echo "✓ Frontend build completed successfully"
+          args:
+            executable: /bin/bash
           register: frontend_build_shell
           failed_when: frontend_build_shell.rc != 0
+          ignore_errors: yes
 
         - name: Display build log on failure
           shell: tail -n 150 {{ respect_us_path }}/logs/frontend-build.log
@@ -406,6 +416,11 @@
               - "=== FRONTEND BUILD FAILED ==="
               - "{{ build_log_output.stdout_lines }}"
           when: frontend_build_shell.failed
+
+        - name: Fail task when frontend build failed
+          fail:
+            msg: "Frontend Docker image build failed. See {{ respect_us_path }}/logs/frontend-build.log for details."
+          when: frontend_build_shell.rc != 0
 
         - name: Push frontend Docker image
           community.docker.docker_image:
