@@ -100,13 +100,19 @@
       tags: [deploy-code]
       block:
         - name: Upload and extract respect-us.zip
-          unarchive:
+          ansible.builtin.unarchive:
             src: ../respect-us.zip
             dest: "{{ respect_us_path }}"
             remote_src: false
             mode: 0755
-            extra_opts: [--strip-components=1]
-          register: extraction_result
+
+        - name: Move extracted content up one level if nested
+          ansible.builtin.command: >
+            bash -c "shopt -s dotglob && 
+                    mv {{ respect_us_path }}/respect-us/* {{ respect_us_path }}/ &&
+                    rmdir {{ respect_us_path }}/respect-us"
+          args:
+            removes: "{{ respect_us_path }}/respect-us"
 
         - name: Verify extraction success
           stat:
