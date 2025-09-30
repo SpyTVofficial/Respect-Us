@@ -217,8 +217,18 @@
               FROM node:20-alpine AS deps
               WORKDIR /app
 
-              RUN apk add --no-cache git
-              RUN corepack enable && corepack prepare yarn@stable --activate
+              # Install required build tools + yarn
+              RUN apk add --no-cache git python3 make g++ bash curl \
+                  && corepack enable \
+                  && corepack prepare yarn@stable --activate
+
+              COPY package.json yarn.lock* package-lock.json* pnpm-lock.yaml* ./
+
+              # Install dependencies (fallback chain simplified)
+              RUN if [ -f yarn.lock ]; then yarn install; \
+                  elif [ -f package-lock.json ]; then npm install; \
+                  elif [ -f pnpm-lock.yaml ]; then pnpm install; \
+                  else echo "No lockfile found" && exit 1; fi
 
               # Copy only what exists
               COPY package.json ./
