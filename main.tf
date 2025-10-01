@@ -36,7 +36,7 @@ resource "hcloud_ssh_key" "default" {
 resource "hcloud_server" "k3s_master" {
   name        = "${var.cluster_name}-master"
   image       = data.hcloud_image.ubuntu.id
-  server_type = "cpx11"
+  server_type = "cpx21"
   location    = "fsn1"
   ssh_keys    = [hcloud_ssh_key.default.id]
   user_data = <<-EOT
