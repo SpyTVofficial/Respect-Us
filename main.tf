@@ -69,20 +69,21 @@ resource "local_file" "ansible_inventory" {
   filename        = "${path.module}/ansible/inventories/inventory.ini"
   file_permission = "0640"
 
-  content = <<-EOF
+  content = <<EOT
 [k3s_master]
 manager1 ansible_host=${hcloud_server.k3s_master.ipv4_address} ansible_user=root ansible_ssh_private_key_file=./private_key.pem
 
 [k3s_workers]
-%{~ for i, worker in hcloud_server.k3s_worker ~}
+%{ for i, worker in hcloud_server.k3s_worker }
 worker${i + 1} ansible_host=${worker.ipv4_address} ansible_user=root ansible_ssh_private_key_file=./private_key.pem
-%{~ endfor ~}
+%{ endfor }
 
 [all:vars]
 ansible_python_interpreter=/usr/bin/python3
 ansible_ssh_common_args='-o StrictHostKeyChecking=no'
-EOF
+EOT
 }
+
 
 # -------------------------
 # Wait for SSH availability (Master)
