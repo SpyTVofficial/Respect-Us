@@ -244,6 +244,13 @@
         state: started
         enabled: yes
 
+  handlers:
+    - name: restart docker
+      systemd:
+        name: docker
+        state: restarted
+        daemon_reload: yes
+
 
 # ==========================
 # Play 7: Build & Push Images
