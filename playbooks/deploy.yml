@@ -141,7 +141,7 @@
 # Play 5: Deploy Code
 # ==========================
 - name: Deploy application code from ZIP
-  hosts: all
+  hosts: k3s_master
   become: yes
   tasks:
     - name: Remove old backend/frontend
@@ -204,13 +204,23 @@
       copy:
         dest: "/opt/respect-us/frontend/Dockerfile"
         content: |
-          FROM node:18
-          WORKDIR /usr/src/app
-          COPY package*.json ./
-          RUN npm install
-          RUN npm run build
+          # --- Build stage ---
+          FROM node:18 AS build
+          WORKDIR /app
+
+          # Copy dependency manifests first for better caching
+          COPY package.json yarn.lock ./
+          RUN corepack enable && yarn set version stable && yarn install
+
+          # Copy the rest of the project
+          COPY . .
+
+          # Build the app (e.g., creates "dist" or "build" folder)
+          RUN yarn build
+
+          # --- Production stage ---
           FROM nginx:alpine
-          COPY --from=0 /usr/src/app/build /usr/share/nginx/html
+          COPY --from=build /app/dist /usr/share/nginx/html
           EXPOSE 80
           CMD ["nginx", "-g", "daemon off;"]
         mode: '0644'
@@ -229,7 +239,7 @@
 # Play 6: Install Docker
 # ==========================
 - name: Install and configure Docker
-  hosts: all
+  hosts: k3s_master
   become: yes
   tasks:
     - name: Install prerequisites
@@ -299,7 +309,7 @@
 # Play 7: Build & Push Images
 # ==========================
 - name: Build and push Docker images
-  hosts: all
+  hosts: k3s_master
   become: yes
   vars:
     backend_image: "imoresdev/respect-us:backend"
