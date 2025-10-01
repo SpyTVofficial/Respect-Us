@@ -177,13 +177,26 @@
       copy:
         dest: "/opt/respect-us/backend/Dockerfile"
         content: |
-          FROM node:18
-          WORKDIR /usr/src/app
-          COPY package*.json ./
-          RUN npm install
-          COPY . .
+          # Stage 1: Build
+          FROM python:3.11-slim AS builder
+          WORKDIR /app
+          RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
+          RUN pip install --no-cache-dir virtualenv
+          COPY requirements.txt .
+          RUN virtualenv venv && . venv/bin/activate && pip install --no-cache-dir -r requirements.txt
+
+          # Stage 2: Runtime
+          FROM python:3.11-slim
+          WORKDIR /app
+          RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+          COPY --from=builder /app/venv /app/venv
+          COPY --chown=appuser:appuser . .
+          RUN chmod +x run.sh || true
+          HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+            CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()" || exit 1
+          USER appuser
           EXPOSE 8000
-          CMD ["node", "server.js"]
+          CMD ["/bin/bash", "-c", "source venv/bin/activate && exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2"]
         mode: '0644'
         force: no
 
