@@ -366,12 +366,12 @@
                         cpu: "{{ resource_limits.cpu }}"
 
 
-# ==========================
-# Handlers
-# ==========================
-handlers:
-  - name: restart docker
-    systemd:
-      name: docker
-      state: restarted
-      daemon_reload: yes
+  # ==========================
+  # Handlers
+  # ==========================
+  handlers:
+    - name: restart docker
+      systemd:
+        name: docker
+        state: restarted
+        daemon_reload: yes
