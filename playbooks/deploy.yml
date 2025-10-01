@@ -77,15 +77,17 @@
 # ==========================
 # Play 3: Worker Join
 # ==========================
-- hosts: k3s_workers
+- name: Join workers to k3s cluster
+  hosts: k3s_workers
   become: yes
-  vars:
-    master_ip: "{{ hostvars[groups['k3s_master'][0]]['ansible_host'] }}"
-    token: "{{ hostvars[groups['k3s_master'][0]]['master_token'] }}"
   tasks:
-    - name: Join worker to k3s cluster
+    - name: Join workers
       shell: |
-        curl -sfL https://get.k3s.io | K3S_URL=https://{{ master_ip }}:6443 K3S_TOKEN={{ token }} sh -
+        K3S_URL="https://{{ hostvars['manager1'].ansible_default_ipv4.address }}:6443"
+        K3S_TOKEN="{{ hostvars['manager1'].k3s_token.stdout }}"
+        curl -sfL https://get.k3s.io | K3S_URL=$K3S_URL K3S_TOKEN=$K3S_TOKEN sh -
+      args:
+        creates: /usr/local/bin/k3s
 
 
 # ==========================
