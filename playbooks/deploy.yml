@@ -73,6 +73,19 @@
     - name: Ensure K3s installed on master
       shell: curl -sfL https://get.k3s.io | sh
 
+    - name: Fetch K3S token
+      command: cat /var/lib/rancher/k3s/server/node-token
+      register: k3s_token
+      changed_when: false
+
+    - name: Set k3s token fact
+      set_fact:
+        k3s_token: "{{ k3s_token.stdout }}"
+
+    - name: Set master token fact
+      set_fact:
+        master_token: "{{ k3s_token.stdout }}"
+
 
 # ==========================
 # Play 3: Worker Join
@@ -84,7 +97,7 @@
     - name: Join workers
       shell: |
         K3S_URL="https://{{ hostvars['manager1'].ansible_default_ipv4.address }}:6443"
-        K3S_TOKEN="{{ hostvars['manager1'].k3s_token.stdout }}"
+        K3S_TOKEN="{{ hostvars['manager1'].k3s_token }}"
         curl -sfL https://get.k3s.io | K3S_URL=$K3S_URL K3S_TOKEN=$K3S_TOKEN sh -
       args:
         creates: /usr/local/bin/k3s
@@ -374,5 +387,3 @@
                       limits:
                         memory: "{{ resource_limits.memory }}"
                         cpu: "{{ resource_limits.cpu }}"
-
-
