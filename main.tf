@@ -40,6 +40,18 @@ resource "hcloud_server" "k3s_master" {
   location    = "fsn1"
   ssh_keys    = [hcloud_ssh_key.default.id]
   user_data = <<-EOT
+  package_update: true
+  package_upgrade: true
+
+  runcmd:
+    - fallocate -l 2G /swapfile
+    - chmod 600 /swapfile
+    - mkswap /swapfile
+    - swapon /swapfile
+    - echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    - sysctl vm.swappiness=10
+    - echo 'vm.swappiness=10' >> /etc/sysctl.conf
+
     #cloud-config
     package_update: true
     packages:
