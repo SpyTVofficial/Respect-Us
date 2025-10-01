@@ -52,6 +52,16 @@
         msg: "respect-us.zip not found at ../respect-us.zip"
       when: not zip_file_check.stat.exists
 
+  # ==========================
+  # Handlers
+  # ==========================
+  handlers:
+    - name: restart docker
+      systemd:
+        name: docker
+        state: restarted
+        daemon_reload: yes
+
 
 # ==========================
 # Play 2: K3s Master Setup
@@ -68,7 +78,7 @@
 # Play 3: Worker Join
 # ==========================
 - name: Join workers to k3s cluster
-  hosts: k3s_worker
+  hosts: k3s_workers
   become: yes
   tasks:
     - name: Join workers
@@ -366,12 +376,3 @@
                         cpu: "{{ resource_limits.cpu }}"
 
 
-  # ==========================
-  # Handlers
-  # ==========================
-  handlers:
-    - name: restart docker
-      systemd:
-        name: docker
-        state: restarted
-        daemon_reload: yes
