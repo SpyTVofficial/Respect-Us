@@ -39,14 +39,22 @@ resource "hcloud_server" "k3s_master" {
   server_type = "cpx11"
   location    = "fsn1"
   ssh_keys    = [hcloud_ssh_key.default.id]
-    user_data = <<-EOT
+  user_data = <<-EOT
     #cloud-config
     package_update: true
+    package_upgrade: all
     packages:
-      - python3
-      - python3-apt
-      - docker.io
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
     runcmd:
+      - mkdir -p /etc/apt/keyrings
+      - curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      - echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
+      - apt-get update -y
+      - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
       - systemctl enable docker
       - systemctl start docker
   EOT
