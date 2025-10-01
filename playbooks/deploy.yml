@@ -110,11 +110,11 @@
         owner: root
         group: root
       loop:
-        - "{{ respect_us_path }}"
-        - "{{ respect_us_path }}/logs"
-        - "{{ respect_us_path }}/configs"
-        - "{{ respect_us_path }}/backend"
-        - "{{ respect_us_path }}/frontend"
+        - "/opt/respect-us"
+        - "/opt/respect-us/logs"
+        - "/opt/respect-us/configs"
+        - "/opt/respect-us/backend"
+        - "/opt/respect-us/frontend"
 
 
 # ==========================
@@ -126,7 +126,7 @@
   tasks:
     - name: Remove old backend/frontend
       file:
-        path: "{{ respect_us_path }}/{{ item }}"
+        path: "/opt/respect-us/{{ item }}"
         state: absent
       loop:
         - backend
@@ -135,13 +135,13 @@
     - name: Extract respect-us.zip
       ansible.builtin.unarchive:
         src: ../respect-us.zip
-        dest: "{{ respect_us_path }}"
+        dest: "/opt/respect-us"
         remote_src: false
         mode: '0755'
 
     - name: Verify backend/frontend directories exist
       stat:
-        path: "{{ respect_us_path }}/{{ item }}"
+        path: "/opt/respect-us/{{ item }}"
       loop:
         - backend
         - frontend
@@ -155,7 +155,7 @@
 
     - name: Set permissions on extracted files
       file:
-        path: "{{ respect_us_path }}"
+        path: "/opt/respect-us"
         recurse: yes
         mode: 'u=rwX,g=rX,o=rX'
         owner: root
@@ -244,7 +244,7 @@
         name: "{{ backend_image }}"
         source: build
         build:
-          path: "{{ respect_us_path }}/backend"
+          path: "/opt/respect-us/backend"
           pull: yes
           nocache: yes
         tag: "{{ backend_image.split(':')[1] }}"
@@ -258,7 +258,7 @@
     - name: Build frontend image
       command: docker build -t "{{ frontend_image }}" .
       args:
-        chdir: "{{ respect_us_path }}/frontend"
+        chdir: "/opt/respect-us/frontend"
       async: 3600
       poll: 30
 
