@@ -37,7 +37,7 @@ resource "hcloud_server" "k3s_master" {
   name        = "${var.cluster_name}-master"
   image       = data.hcloud_image.ubuntu.id
   server_type = "cpx11"
-  location    = "hel1"
+  location    = "fsn1"
   ssh_keys    = [hcloud_ssh_key.default.id]
 }
 
@@ -49,7 +49,7 @@ resource "hcloud_server" "k3s_worker" {
   name        = "${var.cluster_name}-worker-${count.index + 1}"
   image       = data.hcloud_image.ubuntu.id
   server_type = "cpx11"
-  location    = "hel1"
+  location    = "fsn1"
   ssh_keys    = [hcloud_ssh_key.default.id]
 }
 
