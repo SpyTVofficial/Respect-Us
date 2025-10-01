@@ -387,23 +387,12 @@
           delay: 5
 
         - name: Build frontend Docker image with full logging
-          shell: |
-            set -Eeuo pipefail
-            cd {{ respect_us_path }}/frontend
-
-            # Build with full output (pipefail ensures failure is detected even with tee)
-            docker build \
-              --progress=plain \
-              --no-cache \
-              -t {{ frontend_image }} \
-              . 2>&1 | tee {{ respect_us_path }}/logs/frontend-build.log
-
-            echo "✓ Frontend build completed successfully"
+          command: docker build -t myapp-frontend .
           args:
-            executable: /bin/bash
-          register: frontend_build_shell
-          failed_when: frontend_build_shell.rc != 0
-          ignore_errors: yes
+            chdir: /opt/myapp/frontend   # adjust to your Dockerfile path
+          async: 3600    # allow up to 1 hour
+          poll: 30       # check every 30s
+
 
         - name: Display build log on failure
           shell: tail -n 150 {{ respect_us_path }}/logs/frontend-build.log
