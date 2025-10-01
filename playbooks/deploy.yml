@@ -1,6 +1,6 @@
 ---
 - name: Deploy Respect Us Application to K3s Cluster
-  hosts: k3s_master
+  hosts: all
   become: yes
   vars:
     respect_us_path: /opt/respect-us
@@ -40,18 +40,38 @@
       when: not zip_file_check.stat.exists
       tags: [always]
 
-  handlers:
-    - name: restart docker
-      systemd:
-        name: docker
-        state: restarted
-        daemon_reload: yes
-
   tasks:
-    - name: Setup system packages and Python libs
-      tags: [setup]
+
+    # -------------------------
+    # K3s master setup
+    # -------------------------
+    - name: Ensure K3s installed on master
+      hosts: k3s_master
+      become: yes
+      shell: |
+        curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode 644" sh -
+      args:
+        creates: /usr/local/bin/k3s
+
+    # -------------------------
+    # Join workers
+    # -------------------------
+    - name: Join workers to k3s cluster
+      hosts: k3s_worker
+      become: yes
+      shell: |
+        K3S_URL="https://{{ hostvars['k3s_master'].ansible_default_ipv4.address }}:6443"
+        K3S_TOKEN="{{ hostvars['k3s_master'].k3s_token.stdout }}"
+        curl -sfL https://get.k3s.io | K3S_URL=$K3S_URL K3S_TOKEN=$K3S_TOKEN sh -
+      args:
+        creates: /usr/local/bin/k3s
+
+    # -------------------------
+    # Setup system packages and directories
+    # -------------------------
+    - name: Setup system packages and directories
       block:
-        - name: Ensure unzip and Python3-pip are installed
+        - name: Install prerequisites
           apt:
             name:
               - unzip
@@ -59,14 +79,14 @@
             state: present
             update_cache: yes
 
-        - name: Install Kubernetes Python client for K8s modules
+        - name: Install Kubernetes Python client
           pip:
             name:
               - kubernetes
               - pyyaml
             state: present
 
-        - name: Create directory structure under respect-us
+        - name: Create respect-us directory structure
           file:
             path: "{{ item }}"
             state: directory
@@ -77,28 +97,30 @@
             - "{{ respect_us_path }}"
             - "{{ respect_us_path }}/logs"
             - "{{ respect_us_path }}/configs"
+            - "{{ respect_us_path }}/backend"
+            - "{{ respect_us_path }}/frontend"
 
+    # -------------------------
+    # Deploy code
+    # -------------------------
     - name: Deploy application code from ZIP
-      tags: [deploy-code]
       block:
-        - name: Remove old extraction if exists
+        - name: Remove old backend/frontend
           file:
-            path: "{{ respect_us_path }}/backend"
+            path: "{{ respect_us_path }}/{{ item }}"
             state: absent
+          loop:
+            - backend
+            - frontend
 
-        - name: Remove old frontend if exists
-          file:
-            path: "{{ respect_us_path }}/frontend"
-            state: absent
-
-        - name: Extract respect-us.zip to target directory
+        - name: Extract respect-us.zip
           ansible.builtin.unarchive:
             src: ../respect-us.zip
             dest: "{{ respect_us_path }}"
             remote_src: false
             mode: '0755'
 
-        - name: Verify that backend and frontend directories exist
+        - name: Verify backend/frontend directories exist
           stat:
             path: "{{ respect_us_path }}/{{ item }}"
           loop:
@@ -106,9 +128,9 @@
             - frontend
           register: dir_exists
 
-        - name: Fail if backend or frontend directory is missing
+        - name: Fail if backend/frontend missing
           fail:
-            msg: "Extraction failed: Missing directory {{ item.item }}."
+            msg: "Extraction failed: Missing {{ item.item }}"
           loop: "{{ dir_exists.results }}"
           when: not item.stat.exists
 
@@ -120,10 +142,12 @@
             owner: root
             group: root
 
+    # -------------------------
+    # Install and configure Docker
+    # -------------------------
     - name: Install and configure Docker
-      tags: [docker]
       block:
-        - name: Install prerequisites for Docker
+        - name: Install prerequisites
           apt:
             name:
               - apt-transport-https
@@ -135,7 +159,7 @@
             state: present
             update_cache: yes
 
-        - name: Add Docker's official GPG key
+        - name: Add Docker's GPG key
           apt_key:
             url: https://download.docker.com/linux/ubuntu/gpg
             state: present
@@ -143,7 +167,7 @@
 
         - name: Add Docker repository
           apt_repository:
-            repo: "deb [arch={{ ansible_architecture | replace('x86_64', 'amd64') }} signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+            repo: "deb [arch={{ ansible_architecture | replace('x86_64','amd64') }} signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
             state: present
             update_cache: yes
 
@@ -158,21 +182,19 @@
             state: present
             update_cache: yes
 
-        - name: Configure Docker daemon (logging and storage)
+        - name: Configure Docker daemon
           copy:
             dest: /etc/docker/daemon.json
             content: |
               {
                 "log-driver": "json-file",
-                "log-opts": {
-                  "max-size": "10m",
-                  "max-file": "3"
-                },
+                "log-opts": { "max-size": "10m", "max-file": "3" },
                 "storage-driver": "overlay2",
                 "live-restore": true,
                 "userland-proxy": false
               }
-          notify: restart docker
+          notify:
+            - restart docker
 
         - name: Start and enable Docker
           systemd:
@@ -180,101 +202,146 @@
             state: started
             enabled: yes
 
-        - name: Add ansible user to docker group (if not root)
-          user:
-            name: "{{ ansible_user }}"
-            groups: docker
-            append: yes
-          when: ansible_user != 'root'
-
-        - name: Reconnect as non-root user for Docker group
-          meta: reset_connection
-
-    - name: Build and push Docker images to Docker Hub
-      tags: [docker-build]
+    # -------------------------
+    # Build and push Docker images
+    # -------------------------
+    - name: Build and push Docker images
       block:
-        - name: Login to Docker registry (Docker Hub)
+        - name: Docker login
           community.docker.docker_login:
             username: "{{ registry_user }}"
             password: "{{ registry_password }}"
             reauthorize: yes
           no_log: true
 
-        - name: Ensure backend and frontend directories exist
-          file:
-            path: "{{ item }}"
-            state: directory
-          loop:
-            - "{{ respect_us_path }}/backend"
-            - "{{ respect_us_path }}/frontend"
+        - name: Build backend image
+          community.docker.docker_image:
+            name: "{{ backend_image }}"
+            source: build
+            build:
+              path: "{{ respect_us_path }}/backend"
+              pull: yes
+              nocache: yes
+            tag: "{{ backend_image.split(':')[1] }}"
 
-        - name: Build backend Docker image async
-          shell: docker build -t "{{ backend_image }}" .
-          args:
-            chdir: "{{ respect_us_path }}/backend"
-          async: 3600
-          poll: 30
-          register: backend_build_job
-
-        - name: Wait for backend build to finish
-          async_status:
-            jid: "{{ backend_build_job.ansible_job_id }}"
-          register: backend_build_result
-          until: backend_build_result.finished
-          retries: 120
-          delay: 30
-
-        - name: Fail if backend build failed
-          fail:
-            msg: "Backend Docker build failed. Check logs or manually run: docker build -t {{ backend_image }} {{ respect_us_path }}/backend"
-          when: backend_build_result.rc != 0
-
-        - name: Push backend Docker image
+        - name: Push backend image
           community.docker.docker_image:
             name: "{{ backend_image }}"
             push: true
             source: local
-          register: backend_push
-          retries: 3
-          delay: 10
 
-        - name: Build frontend Docker image async
-          shell: docker build -t "{{ frontend_image }}" .
+        - name: Build frontend image
+          command: docker build -t "{{ frontend_image }}" .
           args:
             chdir: "{{ respect_us_path }}/frontend"
           async: 3600
           poll: 30
-          register: frontend_build_job
 
-        - name: Wait for frontend build to finish
-          async_status:
-            jid: "{{ frontend_build_job.ansible_job_id }}"
-          register: frontend_build_result
-          until: frontend_build_result.finished
-          retries: 120
-          delay: 30
-
-        - name: Fail if frontend build failed
-          fail:
-            msg: "Frontend Docker build failed. Check logs or manually run: docker build -t {{ frontend_image }} {{ respect_us_path }}/frontend"
-          when: frontend_build_result.rc != 0
-
-        - name: Push frontend Docker image
+        - name: Push frontend image
           community.docker.docker_image:
             name: "{{ frontend_image }}"
             push: true
             source: local
-          register: frontend_push
-          retries: 3
-          delay: 10
 
-        - name: Prune unused Docker data
-          shell: docker system prune -f --volumes
-          changed_when: false
-
+    # -------------------------
+    # Deploy Kubernetes resources
+    # -------------------------
     - name: Deploy Kubernetes resources
-      tags: [k8s-deploy]
       block:
-        # Create namespace, secrets, configmap, deployments, services, ingress, HPA
-        # (same as your original playbook, can paste directly here)
-        # ...
+        - name: Create namespace
+          kubernetes.core.k8s:
+            api_version: v1
+            kind: Namespace
+            name: "{{ namespace }}"
+            state: present
+            kubeconfig: "{{ k3s_kubeconfig }}"
+
+        - name: Create Docker registry secret
+          kubernetes.core.k8s:
+            state: present
+            kubeconfig: "{{ k3s_kubeconfig }}"
+            definition:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: docker-registry-secret
+                namespace: "{{ namespace }}"
+              type: kubernetes.io/dockerconfigjson
+              data:
+                .dockerconfigjson: "{{ lookup('template','docker-config.json.j2') | b64encode }}"
+          no_log: true
+
+        # Backend Deployment
+        - name: Deploy backend
+          kubernetes.core.k8s:
+            state: present
+            kubeconfig: "{{ k3s_kubeconfig }}"
+            definition:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: respect-us-backend
+                namespace: "{{ namespace }}"
+              spec:
+                replicas: "{{ backend_replicas }}"
+                selector:
+                  matchLabels:
+                    app: respect-us-backend
+                template:
+                  metadata:
+                    labels:
+                      app: respect-us-backend
+                  spec:
+                    containers:
+                      - name: backend
+                        image: "{{ backend_image }}"
+                        ports:
+                          - containerPort: 8000
+                        resources:
+                          requests:
+                            memory: "{{ resource_requests.memory }}"
+                            cpu: "{{ resource_requests.cpu }}"
+                          limits:
+                            memory: "{{ resource_limits.memory }}"
+                            cpu: "{{ resource_limits.cpu }}"
+
+        # Frontend Deployment
+        - name: Deploy frontend
+          kubernetes.core.k8s:
+            state: present
+            kubeconfig: "{{ k3s_kubeconfig }}"
+            definition:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: respect-us-frontend
+                namespace: "{{ namespace }}"
+              spec:
+                replicas: "{{ frontend_replicas }}"
+                selector:
+                  matchLabels:
+                    app: respect-us-frontend
+                template:
+                  metadata:
+                    labels:
+                      app: respect-us-frontend
+                  spec:
+                    containers:
+                      - name: frontend
+                        image: "{{ frontend_image }}"
+                        ports:
+                          - containerPort: 3000
+                        resources:
+                          requests:
+                            memory: "{{ resource_requests.memory }}"
+                            cpu: "{{ resource_requests.cpu }}"
+                          limits:
+                            memory: "{{ resource_limits.memory }}"
+                            cpu: "{{ resource_limits.cpu }}"
+
+  handlers:
+    - name: restart docker
+      systemd:
+        name: docker
+        state: restarted
+        daemon_reload: yes
