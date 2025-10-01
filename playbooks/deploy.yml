@@ -173,6 +173,36 @@
       loop: "{{ dir_exists.results }}"
       when: not item.stat.exists
 
+    - name: Create backend Dockerfile if missing
+      copy:
+        dest: "/opt/respect-us/backend/Dockerfile"
+        content: |
+          FROM node:18
+          WORKDIR /usr/src/app
+          COPY package*.json ./
+          RUN npm install
+          COPY . .
+          EXPOSE 8000
+          CMD ["node", "server.js"]
+        mode: '0644'
+      force: no
+
+    - name: Create frontend Dockerfile if missing
+      copy:
+        dest: "/opt/respect-us/frontend/Dockerfile"
+        content: |
+          FROM node:18
+          WORKDIR /usr/src/app
+          COPY package*.json ./
+          RUN npm install
+          RUN npm run build
+          FROM nginx:alpine
+          COPY --from=0 /usr/src/app/build /usr/share/nginx/html
+          EXPOSE 80
+          CMD ["nginx", "-g", "daemon off;"]
+        mode: '0644'
+      force: no
+
     - name: Set permissions on extracted files
       file:
         path: "/opt/respect-us"
