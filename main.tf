@@ -39,6 +39,17 @@ resource "hcloud_server" "k3s_master" {
   server_type = "cpx11"
   location    = "fsn1"
   ssh_keys    = [hcloud_ssh_key.default.id]
+    user_data = <<-EOT
+    #cloud-config
+    package_update: true
+    packages:
+      - python3
+      - python3-apt
+      - docker.io
+    runcmd:
+      - systemctl enable docker
+      - systemctl start docker
+  EOT
 }
 
 # -------------------------
