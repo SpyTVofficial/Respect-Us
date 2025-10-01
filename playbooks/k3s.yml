@@ -10,9 +10,11 @@
       register: k3s_token
       changed_when: false
 
-    - name: Set fact for token
+    - name: Make token available to workers
       set_fact:
-        master_token: "{{ k3s_token.stdout }}"
+        k3s_token_global: "{{ k3s_token.stdout }}"
+      run_once: true
+      delegate_to: localhost
 
 - hosts: k3s_workers
   become: yes
