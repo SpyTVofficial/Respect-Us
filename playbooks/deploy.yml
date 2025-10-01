@@ -43,13 +43,13 @@
 
     - name: Check for respect-us.zip on controller
       ansible.builtin.stat:
-        path: "/root/respect-us/respect-us.zip"
+        path: "../respect-us.zip"
       register: zip_file_check
       delegate_to: localhost
 
     - name: Fail if respect-us.zip is missing
       fail:
-        msg: "respect-us.zip not found at /root/respect-us/respect-us.zip"
+        msg: "respect-us.zip not found at ../respect-us.zip"
       when: not zip_file_check.stat.exists
 
   # ==========================
@@ -154,7 +154,7 @@
 
     - name: Extract respect-us.zip
       ansible.builtin.unarchive:
-        src: /root/respect-us/respect-us.zip
+        src: ../respect-us.zip
         dest: "/opt/respect-us"
         remote_src: false
         mode: '0755'
