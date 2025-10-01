@@ -6,26 +6,28 @@
 # -------------------------
 # Pre-flight checks (runs on all hosts)
 # -------------------------
-- name: Pre-flight validation
+- name: Set global variables
   hosts: all
   become: yes
-  vars:
-    respect_us_path: /opt/respect-us
-    backend_image: "imoresdev/respect-us:backend"
-    frontend_image: "imoresdev/respect-us:frontend"
-    registry_user: "{{ lookup('env','DOCKER_USER') }}"
-    registry_password: "{{ lookup('env','DOCKER_PASS') }}"
-    k3s_kubeconfig: /etc/rancher/k3s/k3s.yaml
-    namespace: respect-us
-    domain_name: respect-us.local
-    backend_replicas: 2
-    frontend_replicas: 2
-    resource_requests:
-      memory: "256Mi"
-      cpu: "250m"
-    resource_limits:
-      memory: "512Mi"
-      cpu: "500m"
+  tasks:
+    - set_fact:
+        respect_us_path: /opt/respect-us
+        backend_image: "imoresdev/respect-us:backend"
+        frontend_image: "imoresdev/respect-us:frontend"
+        registry_user: "{{ lookup('env','DOCKER_USER') }}"
+        registry_password: "{{ lookup('env','DOCKER_PASS') }}"
+        k3s_kubeconfig: /etc/rancher/k3s/k3s.yaml
+        namespace: respect-us
+        backend_replicas: 2
+        frontend_replicas: 2
+        resource_requests:
+          memory: "256Mi"
+          cpu: "250m"
+        resource_limits:
+          memory: "512Mi"
+          cpu: "500m"
+      run_once: true
+
 
   pre_tasks:
     - name: Validate Docker registry credentials
