@@ -258,6 +258,11 @@
 - name: Build and push Docker images
   hosts: all
   become: yes
+  vars:
+    backend_image: "imoresdev/respect-us:backend"
+    frontend_image: "imoresdev/respect-us:frontend"
+    registry_user: "{{ lookup('env','DOCKER_USER') | default('') }}"
+    registry_password: "{{ lookup('env','DOCKER_PASS') | default('') }}"
   tasks:
     - name: Docker login
       community.docker.docker_login:
@@ -302,6 +307,20 @@
 - name: Deploy Kubernetes resources
   hosts: k3s_master
   become: yes
+  vars:
+    k3s_kubeconfig: /etc/rancher/k3s/k3s.yaml
+    namespace: respect-us
+    domain_name: respect-us.local
+    backend_image: "imoresdev/respect-us:backend"
+    frontend_image: "imoresdev/respect-us:frontend"
+    backend_replicas: 2
+    frontend_replicas: 2
+    resource_requests:
+      memory: "256Mi"
+      cpu: "250m"
+    resource_limits:
+      memory: "512Mi"
+      cpu: "500m"
   tasks:
     - name: Create namespace
       kubernetes.core.k8s:
