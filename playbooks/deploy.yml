@@ -1,43 +1,39 @@
 ---
 # ==========================
-# Global variables
-# ==========================
-vars:
-  # Application paths
-  respect_us_path: /opt/respect-us
-
-  # Docker images
-  backend_image: "imoresdev/respect-us:backend"
-  frontend_image: "imoresdev/respect-us:frontend"
-
-  # Registry credentials (read from env, default to empty if unset)
-  registry_user: "{{ lookup('env','DOCKER_USER') | default('') }}"
-  registry_password: "{{ lookup('env','DOCKER_PASS') | default('') }}"
-
-  # K3s / Kubernetes
-  k3s_kubeconfig: /etc/rancher/k3s/k3s.yaml
-  namespace: respect-us
-  domain_name: respect-us.local
-
-  # Scaling
-  backend_replicas: 2
-  frontend_replicas: 2
-
-  # Resource requests/limits
-  resource_requests:
-    memory: "256Mi"
-    cpu: "250m"
-  resource_limits:
-    memory: "512Mi"
-    cpu: "500m"
-
-
-# ==========================
 # Play 1: Pre-checks
 # ==========================
 - name: Deploy Respect Us Application to K3s Cluster
   hosts: all
   become: yes
+
+  vars:
+    # Application paths
+    respect_us_path: /opt/respect-us
+
+    # Docker images
+    backend_image: "imoresdev/respect-us:backend"
+    frontend_image: "imoresdev/respect-us:frontend"
+
+    # Registry credentials (read from env, default to empty if unset)
+    registry_user: "{{ lookup('env','DOCKER_USER') | default('') }}"
+    registry_password: "{{ lookup('env','DOCKER_PASS') | default('') }}"
+
+    # K3s / Kubernetes
+    k3s_kubeconfig: /etc/rancher/k3s/k3s.yaml
+    namespace: respect-us
+    domain_name: respect-us.local
+
+    # Scaling
+    backend_replicas: 2
+    frontend_replicas: 2
+
+    # Resource requests/limits
+    resource_requests:
+      memory: "256Mi"
+      cpu: "250m"
+    resource_limits:
+      memory: "512Mi"
+      cpu: "500m"
 
   pre_tasks:
     - name: Validate Docker registry credentials
