@@ -456,7 +456,7 @@
                   - name: frontend
                     image: "{{ frontend_image }}"
                     ports:
-                      - containerPort: 3000
+                      - containerPort: 5173
                         hostPort: 80   # Exposes frontend directly on port 80
                     resources:
                       requests:
