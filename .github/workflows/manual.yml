@@ -17,6 +17,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
+      - name: Setup Hetzner CLI
+        run: |
+          curl -O https://github.com/hetznercloud/cli/releases/download/v1.40.1/hcloud-linux-amd64.tar.gz
+          tar -xvzf hcloud-linux-amd64.tar.gz
+          sudo mv hcloud /usr/local/bin/
+
+      - name: Destroy existing servers if they exist
+        run: |
+          for name in k3s-cluster-master k3s-cluster-worker-1 k3s-cluster-worker-2; do
+            if hcloud server list -o columns=NAME,STATUS | grep -q $name; then
+              echo "Destroying existing server $name..."
+              hcloud server delete $name || true
+            fi
+          done
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
         with:
@@ -33,12 +48,11 @@ jobs:
             -var="docker_pass=${{ secrets.DOCKER_PASS }}" \
             -out=tfplan
 
-
       - name: Terraform Apply
         run: terraform apply -input=false -auto-approve tfplan
 
       - name: Terraform Destroy on failure
-        if: failure()   # runs only if any previous step fails
+        if: failure()
         run: |
           terraform destroy -auto-approve \
             -var="hcloud_token=${{ secrets.HETZNER_TOKEN }}" \
