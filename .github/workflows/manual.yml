@@ -26,11 +26,13 @@ jobs:
         run: terraform init
 
       - name: Terraform Plan
-        run: terraform plan \
-          -var="hcloud_token=${{ secrets.HETZNER_TOKEN }}" \
-          -var="docker_user=${{ secrets.DOCKER_USER }}" \
-          -var="docker_pass=${{ secrets.DOCKER_PASS }}" \
-          -out=tfplan
+        run: |
+          terraform plan \
+            -var="hcloud_token=${{ secrets.HETZNER_TOKEN }}" \
+            -var="docker_user=${{ secrets.DOCKER_USER }}" \
+            -var="docker_pass=${{ secrets.DOCKER_PASS }}" \
+            -out=tfplan
+
 
       - name: Terraform Apply
         run: terraform apply -input=false -auto-approve tfplan
