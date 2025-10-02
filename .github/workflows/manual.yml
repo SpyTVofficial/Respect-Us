@@ -39,4 +39,6 @@ jobs:
 
       - name: Terraform Destroy on failure
         if: failure()   # runs only if any previous step fails
-        run: terraform destroy -auto-approve -var="hcloud_token=${{ secrets.HETZNER_TOKEN }}"
+        run: terraform destroy -auto-approve -var="hcloud_token=${{ secrets.HETZNER_TOKEN }}" \
+            -var="docker_user=${{ secrets.DOCKER_USER }}" \
+            -var="docker_pass=${{ secrets.DOCKER_PASS }}" \
