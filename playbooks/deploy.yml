@@ -452,12 +452,14 @@
                 labels:
                   app: respect-us-frontend
               spec:
+                nodeSelector:
+                  kubernetes.io/hostname: "{{ ansible_hostname }}"  # ensures it runs on master
                 containers:
                   - name: frontend
                     image: "{{ frontend_image }}"
                     ports:
                       - containerPort: 5173
-                        hostPort: 80   # Exposes frontend directly on port 80
+                        hostPort: 80   # exposed directly on master IP
                     resources:
                       requests:
                         memory: "{{ resource_requests.memory }}"
