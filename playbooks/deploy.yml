@@ -396,7 +396,7 @@
             name: regcred
             namespace: default
           data:
-            .dockerconfigjson: "{{ lookup('pipe', 'echo -n ' ~ registry_username ~ ':' ~ registry_password ~ ' | base64') }}"
+            .dockerconfigjson: "{{ lookup('pipe', 'echo -n ' ~ registry_user ~ ':' ~ registry_password ~ ' | base64') }}"
           type: kubernetes.io/dockerconfigjson
 
     - name: Deploy backend
