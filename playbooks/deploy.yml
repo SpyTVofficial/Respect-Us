@@ -15,9 +15,9 @@
     frontend_image: "imoresdev/respect-us:frontend"
 
     # Registry credentials (read from env, default to empty if unset)
-    registry_user: "{{ lookup('env','DOCKER_USER') | default('') }}"
-    registry_password: "{{ lookup('env','DOCKER_PASS') | default('') }}"
-
+    registry_user: "{{ lookup('env', 'DOCKER_USER') }}"
+    registry_password: "{{ lookup('env', 'DOCKER_PASS') }}"
+    
     # K3s / Kubernetes
     k3s_kubeconfig: /etc/rancher/k3s/k3s.yaml
     namespace: respect-us

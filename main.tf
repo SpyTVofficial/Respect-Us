@@ -155,8 +155,8 @@ resource "null_resource" "run_ansible" {
 
   provisioner "local-exec" {
     command = <<EOT
-      ansible-playbook -i ${local_file.ansible_inventory.filename} -e "registry_user=${DOCKER_USER}" -e "registry_password=${DOCKER_PASS}" playbooks/k3s.yml
-      ansible-playbook -i ${local_file.ansible_inventory.filename} -e "registry_user=${DOCKER_USER}" -e "registry_password=${DOCKER_PASS}" playbooks/deploy.yml
+      ansible-playbook -i ${local_file.ansible_inventory.filename} playbooks/k3s.yml
+      ansible-playbook -i ${local_file.ansible_inventory.filename} playbooks/deploy.yml
     EOT
   }
 }
