@@ -212,11 +212,8 @@
           # Copy dependency files first
           COPY package.json yarn.lock ./
 
-          # Force Yarn 3.6.0 and skip patch errors
-          RUN corepack enable && corepack prepare yarn@3.6.0 --activate
-
-          # Install dependencies (ignore immutable errors)
-          RUN yarn install || true
+          # Install Yarn (bundled in Node 18 already via Corepack)
+          RUN corepack enable && yarn install --frozen-lockfile
 
           # Copy the rest of the project
           COPY . .
@@ -226,6 +223,7 @@
 
           # Run Vite dev server
           CMD ["yarn", "dev", "--host"]
+
         mode: '0644'
         force: no
 
