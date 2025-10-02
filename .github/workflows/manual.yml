@@ -26,14 +26,14 @@ jobs:
         run: terraform init
 
       - name: Terraform Plan
-        run: terraform plan -var="hcloud_token=${{ secrets.HETZNER_TOKEN }}" -out=tfplan
-
-      - name: Terraform Apply
-        run: terraform apply -input=false -auto-approve \
+        run: terraform plan \
           -var="hcloud_token=${{ secrets.HETZNER_TOKEN }}" \
           -var="docker_user=${{ secrets.DOCKER_USER }}" \
-          -var="docker_pass=${{ secrets.DOCKER_PASS }}"
+          -var="docker_pass=${{ secrets.DOCKER_PASS }}" \
+          -out=tfplan
 
+      - name: Terraform Apply
+        run: terraform apply -input=false -auto-approve tfplan
 
       - name: Terraform Destroy on failure
         if: failure()   # runs only if any previous step fails
