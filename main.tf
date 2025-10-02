@@ -154,6 +154,10 @@ resource "null_resource" "run_ansible" {
   ]
 
   provisioner "local-exec" {
+    environment = {
+      DOCKER_USER = var.docker_user
+      DOCKER_PASS = var.docker_pass
+    }
     command = <<EOT
       ansible-playbook -i ${local_file.ansible_inventory.filename} playbooks/k3s.yml
       ansible-playbook -i ${local_file.ansible_inventory.filename} playbooks/deploy.yml

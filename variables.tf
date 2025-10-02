@@ -15,3 +15,15 @@ variable "worker_count" {
   type        = number
   default     = 2
 }
+
+variable "docker_user" {
+  description = "Docker registry username"
+  type        = string
+  sensitive   = true
+}
+
+variable "docker_pass" {
+  description = "Docker registry password"
+  type        = string
+  sensitive   = true
+}
