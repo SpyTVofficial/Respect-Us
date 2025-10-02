@@ -15,8 +15,8 @@
     frontend_image: "imoresdev/respect-us:frontend"
 
     # Registry credentials (read from env, default to empty if unset)
-    registry_user: "{{ lookup('env', 'DOCKER_USER') }}"
-    registry_password: "{{ lookup('env', 'DOCKER_PASS') }}"
+    registry_user: "{{ lookup('env', 'DOCKER_USER') | default('') }}"
+    registry_password: "{{ lookup('env', 'DOCKER_PASS') | default('') }}"
     
     # K3s / Kubernetes
     k3s_kubeconfig: /etc/rancher/k3s/k3s.yaml
@@ -387,6 +387,9 @@
         kubeconfig: "{{ k3s_kubeconfig }}"
 
     - name: Create Docker registry secret
+      vars:
+        registry_user: "{{ lookup('env', 'DOCKER_USER') | default('') }}"
+        registry_password: "{{ lookup('env', 'DOCKER_PASS') | default('') }}"
       kubernetes.core.k8s:
         kubeconfig: "{{ k3s_kubeconfig }}"
         definition:
@@ -395,9 +398,9 @@
           metadata:
             name: regcred
             namespace: default
-          data:
-            .dockerconfigjson: "{{ lookup('pipe', 'echo -n ' ~ registry_user ~ ':' ~ registry_password ~ ' | base64') }}"
           type: kubernetes.io/dockerconfigjson
+          data:
+            .dockerconfigjson: "{{ lookup('pipe', 'echo -n ' ~ registry_user ~ ':' ~ registry_password ~ ' | base64 -w0') }}"
 
     - name: Deploy backend
       kubernetes.core.k8s:
