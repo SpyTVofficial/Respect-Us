@@ -388,18 +388,16 @@
 
     - name: Create Docker registry secret
       kubernetes.core.k8s:
-        state: present
         kubeconfig: "{{ k3s_kubeconfig }}"
         definition:
           apiVersion: v1
           kind: Secret
           metadata:
-            name: docker-registry-secret
-            namespace: "{{ namespace }}"
-          type: kubernetes.io/dockerconfigjson
+            name: regcred
+            namespace: default
           data:
-            .dockerconfigjson: "{{ lookup('template','docker-config.json.j2') | b64encode }}"
-      no_log: true
+            .dockerconfigjson: "{{ lookup('pipe', 'echo -n ' ~ registry_username ~ ':' ~ registry_password ~ ' | base64') }}"
+          type: kubernetes.io/dockerconfigjson
 
     - name: Deploy backend
       kubernetes.core.k8s:
