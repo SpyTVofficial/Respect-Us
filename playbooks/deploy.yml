@@ -200,6 +200,18 @@
         mode: '0644'
         force: no
 
+    - name: Fix @stackframe/react version in package.json
+      ansible.builtin.replace:
+        path: /root/respect-us-dev/frontend/package.json
+        regexp: '"@stackframe/react":\s*"patch:@stackframe/react@npm:2.8.12#.*"'
+        replace: '"@stackframe/react": "2.8.12"'
+
+    - name: Fix @stackframe/react version in yarn.lock
+      ansible.builtin.replace:
+        path: /root/respect-us-dev/frontend/yarn.lock
+        regexp: 'patch:@stackframe/react@npm:2.8.12#.*'
+        replace: '2.8.12'
+
     - name: Create frontend Dockerfile if missing
       copy:
         dest: "/opt/respect-us/frontend/Dockerfile"
@@ -212,10 +224,6 @@
           # Copy dependency files first
           COPY package.json yarn.lock ./
 
-          # Fix patched dependency to normal version
-          RUN sed -i 's|patch:@stackframe/react@npm:2.8.12#.*|2.8.12|' package.json && \
-              sed -i 's|patch:@stackframe/react@npm:2.8.12#.*|2.8.12|' yarn.lock
-              
           # Install Yarn (bundled in Node 18 already via Corepack)
           RUN corepack enable && yarn install --frozen-lockfile
 
