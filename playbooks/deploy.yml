@@ -202,13 +202,13 @@
 
     - name: Fix @stackframe/react version in package.json
       ansible.builtin.replace:
-        path: /root/respect-us-dev/frontend/package.json
+        path: /opt/respect-us/frontend/package.json
         regexp: '"@stackframe/react":\s*"patch:@stackframe/react@npm:2.8.12#.*"'
         replace: '"@stackframe/react": "2.8.12"'
 
     - name: Fix @stackframe/react version in yarn.lock
       ansible.builtin.replace:
-        path: /root/respect-us-dev/frontend/yarn.lock
+        path: /opt/respect-us/frontend/yarn.lock
         regexp: 'patch:@stackframe/react@npm:2.8.12#.*'
         replace: '2.8.12'
 
